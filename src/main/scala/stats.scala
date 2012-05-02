@@ -6,6 +6,7 @@ import java.net.{InetAddress => Addr, InetSocketAddress => SocketAddr}
 import java.nio.channels.DatagramChannel
 import java.nio.ByteBuffer
 
+
 trait Pusher[T] {
   def push(addr: SocketAddr, chan: DatagramChannel, stats: String*): Seq[T]
 }
@@ -14,26 +15,28 @@ object Pusher {
   type BytesSent = Either[String, Int]
   implicit object DefaultPusher extends Pusher[BytesSent] {
     def push(addr: SocketAddr, chan: DatagramChannel, stats: String*) =
-      for(stat <- stats) yield (allCatch.opt {
+      for(stat <- stats) yield (allCatch.opt {      
         chan.send(ByteBuffer.wrap(stat.getBytes), addr) match {
           case sent if(sent != stat.getBytes.size) => Left(
-            "%s was only partially transmitted" format(stat, addr.getHostName, addr.getPort))
+            "%s was only partially transmitted".format(stat, addr.getHostName, addr.getPort))
           case sent => Right(sent)
         } }).getOrElse(
-          Left("exception thrown while transmitting %s" format(stat))
+          Left("exception thrown while transmitting %s".format(stat))
         )
   }
 }
 
 // see https://github.com/etsy/statsd#readme
-case class Stats(host: String, port: Int = 8125) {
-  private val addr = new SocketAddr(Addr.getByName(host), port)
-  private val chan = DatagramChannel.open
-  private val rand = new Random
+class Statsd(host: String, port: Int = 8125, prefix: String = "") {
+  val addr = new SocketAddr(Addr.getByName(host), port)
+  val chan = DatagramChannel.open
+  val rand = new Random
 
   def counter[T](key: String, by: Int = 1, rate: Double = 1.0)(implicit p: Pusher[T]) = new {
-     def inc = Stats.this.inc(key, by, rate)
-     def dec = Stats.this.dec(key, by, rate)
+   var c : Long = 0L
+     def inc = { c = c + by; Statsd.this.inc(key, by, rate) }
+     def dec = { c = c - by; Statsd.this.dec(key, by, rate) }
+     def total = c
   }
 
   def inc[T](key: String, by: Int = 1, rate: Double = 1.0)(implicit p: Pusher[T]) =
@@ -43,13 +46,13 @@ case class Stats(host: String, port: Int = 8125) {
     count(if(by < 0) by else -by, rate)(key)(p)
 
   def count[T](by: Int = 1, rate: Double = 1.0)(keys: String*)(implicit p: Pusher[T]) =
-    sample(rate, (for(k <- keys) yield "%s:%d|c" format(k, by)): _*)(p)
+    sample(rate, (for(k <- keys) yield "%s%s:%d|c".format(prefix,k, by)): _*)(p)
 
-  def time[T](key: String, `val`: Int, rate: Double = 1.0)(implicit p: Pusher[T]) =
-    sample(rate, "%s:%d|ms" format(key, `val`))(p)
+  def time[T](key: String,`val`: Int, rate: Double = 1.0)(implicit p: Pusher[T]) =
+    sample(rate, "%s%s:%d|ms".format(prefix, key, `val`))(p)
 
   private def sample[T](rate: Double, stats: String*)(implicit pusher: Pusher[T]) =
     if(rate >= 1.0) pusher.push(addr, chan, stats: _*)
     else pusher.push(addr, chan,
-        (for(stat <- stats; d <- Some(rand.nextDouble) if (d <= rate)) yield "%s|@%f" format(stat, rate)): _*)
+        (for(stat <- stats; d <- Some(rand.nextDouble) if (d <= rate)) yield "%s%s|@%f".format(prefix, stat, rate)): _*)
 }
