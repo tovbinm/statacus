@@ -50,8 +50,11 @@ class Statsd(host: String, port: Int = 8125, prefix: String = "") {
   def count[T](by: Int = 1, rate: Double = 1.0)(keys: String*)(implicit p: Pusher[T]) =
     sample(rate, (for(k <- keys) yield "%s%s:%d|c".format(prefix_str,k, by)): _*)(p)
 
-  def time[T](key: String,`val`: Int, rate: Double = 1.0)(implicit p: Pusher[T]) =
-    sample(rate, "%s%s:%d|ms".format(prefix_str, key, `val`))(p)
+  def time[T](key: String, value: Int, rate: Double = 1.0)(implicit p: Pusher[T]) =
+    sample(rate, "%s%s:%d|ms".format(prefix_str, key, value))(p)
+    
+  def gauge[T](key: String, value: Int, rate: Double = 1.0)(implicit p: Pusher[T]) =
+    sample(rate, "%s%s:%d|g".format(prefix_str, key, value))(p)
 
   private def sample[T](rate: Double, stats: String*)(implicit pusher: Pusher[T]) =
     if(rate >= 1.0) pusher.push(addr, chan, stats: _*)
